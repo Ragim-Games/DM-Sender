@@ -128,15 +128,40 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.members[2].send.assert_awaited_once()
 
     @patch("builtins.print")
-    async def test_captcha_is_identified_and_stops(self, output):
+    async def test_captcha_skips_to_remaining_recipients_without_retry(self, output):
         self.members[0].send.side_effect = discord.CaptchaRequired(
             SimpleNamespace(status=400, reason="Bad Request"),
             {"captcha_key": ["required"], "captcha_rqtoken": "private-challenge-data"})
-        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=AsyncMock()))
-        self.members[1].send.assert_not_awaited()
+        sleep = AsyncMock()
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=sleep))
+        sleep.assert_not_awaited()
+        for member in self.members:
+            member.send.assert_awaited_once()
         self.assertIn("CAPTCHA verification", str(output.call_args_list))
         self.assertNotIn("private-challenge-data", str(output.call_args_list))
-        self.assertEqual(self.journal.db.execute("SELECT status FROM deliveries").fetchone()[0], "captcha_required")
+        self.assertEqual(self.journal.db.execute(
+            "SELECT status FROM deliveries WHERE user_id='1'").fetchone()[0], "captcha_required")
+        self.assertIn("sent=2, skipped=0, failed/uncertain=1, not attempted=0", str(output.call_args_list))
+        self.journal.close()
+        self.journal = Journal(Path(self.directory.name) / "journal.sqlite3")
+        self.assertTrue(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=sleep))
+        for member in self.members:
+            member.send.assert_awaited_once()
+        self.assertIn("sent=0, skipped=3, failed/uncertain=0, not attempted=0", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_captcha_preserves_interval_including_consecutive_challenges(self, output):
+        for member in self.members:
+            member.send.side_effect = discord.CaptchaRequired(
+                SimpleNamespace(status=400, reason="Bad Request"), {"captcha_key": ["required"]})
+        sleep = AsyncMock()
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 2, sleep=sleep))
+        self.assertEqual(sleep.await_count, 2)
+        for call in sleep.await_args_list:
+            self.assertEqual(call.args, (2,))
+        for member in self.members:
+            member.send.assert_awaited_once()
+        self.assertIn("sent=0, skipped=0, failed/uncertain=3, not attempted=0", str(output.call_args_list))
 
     @patch("builtins.print")
     async def test_unclassified_400_stops(self, output):

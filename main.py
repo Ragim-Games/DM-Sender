@@ -115,7 +115,7 @@ def read_interval() -> float:
 
 
 async def deliver(recipients, template, server, campaign, journal, interval, *, sleep=asyncio.sleep):
-    """Skip recipient-specific rejections; stop on account or ambiguous failures."""
+    """Skip rejected deliveries and CAPTCHA challenges; stop on other failures."""
     import discord
 
     sent = skipped = failed = 0
@@ -134,9 +134,8 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
             except discord.CaptchaRequired:
                 journal.finish(campaign, member.id, "captcha_required")
                 failed += 1
-                print("Stopped: Discord requires CAPTCHA verification (HTTP 400, code -1).")
-                print("This is a verification challenge, not a closed-DM error. No further recipients will be attempted.")
-                break
+                print(f"Skipped user {member.id}: Discord requires CAPTCHA verification (HTTP 400, code -1). "
+                      "Continuing with the next recipient.")
             except discord.HTTPException as error:
                 # Never print the response body: it can contain request details.
                 journal.finish(campaign, member.id, f"failed:{error.status}:{error.code}")
