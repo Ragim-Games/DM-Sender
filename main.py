@@ -183,14 +183,18 @@ async def run_session(token: str, guild_id: int, template: str, interval: float,
                 raise ValueError("This account cannot access that Guild ID.")
             member = guild.me
             permissions = member.guild_permissions if member else None
-            if not permissions or not (permissions.kick_members or permissions.ban_members or permissions.manage_roles):
-                raise ValueError("A complete member list requires Kick Members, Ban Members, or Manage Roles permission. No messages were sent.")
             print(f"Connected as: {client.user.name} | Server: {guild.name}")
-            print("Loading members, including offline members...")
+            if permissions and (permissions.kick_members or permissions.ban_members or permissions.manage_roles):
+                print("Requesting the server member list...")
+            else:
+                print("Loading members visible to this account. Offline or hidden members may be missing.")
             members = await asyncio.wait_for(guild.fetch_members(), timeout=180)
             unique = {member.id: member for member in members}
-            if guild.member_count and len(unique) < guild.member_count:
-                raise ValueError("Discord returned an incomplete member list. No messages were sent. Try again later.")
+            if not unique:
+                raise ValueError("Discord returned no members for this account. No messages were sent.")
+            print(f"Retrieved members: {len(unique)} | Reported server size: {guild.member_count or 'unknown'}")
+            if not guild.member_count or len(unique) < guild.member_count:
+                print("This list may be incomplete. Only retrieved members will be included in the recipient count.")
             recipients = sorted((member for member in unique.values()
                                  if not member.bot and member.id != client.user.id), key=lambda member: member.id)
             # Validate every personalized message before any send.
@@ -200,7 +204,7 @@ async def run_session(token: str, guild_id: int, template: str, interval: float,
             journal = Journal(ROOT / "data" / "deliveries.sqlite3")
             try:
                 eligible = [member for member in recipients if not journal.seen(campaign, member.id)]
-                print(f"Human members: {len(recipients)} | Previously attempted: {len(recipients)-len(eligible)} | Pending: {len(eligible)}")
+                print(f"Retrieved human recipients: {len(recipients)} | Previously attempted: {len(recipients)-len(eligible)} | Pending: {len(eligible)}")
                 if not eligible:
                     print("No new recipients. Nothing to send.")
                     return True

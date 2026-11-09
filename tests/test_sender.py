@@ -176,10 +176,39 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.person.send.assert_not_awaited()
 
     @patch("builtins.print")
-    async def test_incomplete_member_list_never_sends(self, _print):
+    async def test_incomplete_member_list_can_send_after_confirmation(self, output):
         self.guild.member_count = 5
-        with self.assertRaises(ValueError):
-            await run_session("fake-token", 123, "Hello", 10, False)
+        with patch("main.prompt", return_value="SEND 1") as prompt:
+            self.assertTrue(await run_session("fake-token", 123, "Hello", 10, False))
+        self.person.send.assert_awaited_once()
+        self.assertIn("SEND 1", prompt.call_args.args[0])
+        self.assertIn("may be incomplete", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_sidebar_members_can_send_without_moderation_permissions(self, output):
+        permissions = self.guild.me.guild_permissions
+        permissions.kick_members = permissions.ban_members = permissions.manage_roles = False
+        with patch("main.prompt", return_value="SEND 1"):
+            self.assertTrue(await run_session("fake-token", 123, "Hello", 0, False))
+        self.guild.fetch_members.assert_awaited_once()
+        self.person.send.assert_awaited_once()
+        self.assertIn("members visible to this account", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_partial_preview_does_not_send(self, output):
+        self.guild.me = None
+        self.guild.member_count = None
+        self.assertTrue(await run_session("fake-token", 123, "Hello", 0, True))
+        self.person.send.assert_not_awaited()
+        self.assertIn("may be incomplete", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_empty_member_list_stops_without_confirmation(self, output):
+        self.guild.fetch_members.return_value = []
+        with patch("main.prompt") as prompt:
+            with self.assertRaisesRegex(ValueError, "returned no members"):
+                await run_session("fake-token", 123, "Hello", 0, False)
+        prompt.assert_not_called()
         self.person.send.assert_not_awaited()
 
     @patch("builtins.print")
