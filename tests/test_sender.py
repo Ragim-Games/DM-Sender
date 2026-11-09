@@ -40,9 +40,13 @@ class MessageTests(unittest.TestCase):
             self.assertEqual(read_message(), "First line\n\nLast line")
 
     @patch("builtins.print")
-    def test_interval_rejects_nonfinite_and_too_fast(self, _print):
-        with patch("builtins.input", side_effect=["nan", "inf", "1", "5"]):
-            self.assertEqual(read_interval(), 5)
+    def test_interval_rejects_nonfinite_and_out_of_range(self, _print):
+        with patch("builtins.input", side_effect=["nan", "inf", "-1", "3601", "0"]):
+            self.assertEqual(read_interval(), 0)
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(read_interval(), 0)
+        with patch("builtins.input", return_value="0.1"):
+            self.assertEqual(read_interval(), 0.1)
 
 
 class JournalTests(unittest.TestCase):
@@ -80,9 +84,9 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     @patch("builtins.print")
     async def test_single_pass_and_restart(self, _print):
         sleep = AsyncMock()
-        self.assertTrue(await deliver(self.members, "Hi {username}", "Server", "key", self.journal, 10, sleep=sleep))
-        self.assertEqual(sleep.await_count, 2)
-        self.assertTrue(await deliver(self.members, "Hi {username}", "Server", "key", self.journal, 10, sleep=sleep))
+        self.assertTrue(await deliver(self.members, "Hi {username}", "Server", "key", self.journal, 0, sleep=sleep))
+        sleep.assert_not_awaited()
+        self.assertTrue(await deliver(self.members, "Hi {username}", "Server", "key", self.journal, 0, sleep=sleep))
         for member in self.members:
             member.send.assert_awaited_once()
             self.assertFalse(member.send.call_args.kwargs["allowed_mentions"].everyone)

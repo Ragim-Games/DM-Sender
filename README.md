@@ -31,7 +31,7 @@ python3 -m venv .venv
 1. Enter your account token in the hidden terminal prompt. It is held in memory, never saved by this application, and sent to Discord for authentication. Do not paste it into chat, a command-line argument, source code, or GitHub.
 2. Enter a server's numeric Guild ID. Your account must already belong to the server. Enable Developer Mode in Discord, then use the server's Copy Server ID action.
 3. Type a multiline message ending with `.end`, or load a UTF-8 text file. Optional placeholders are `{username}`, `{display_name}`, and `{server}`. Other braces are literal. Messages must fit within 2,000 UTF-16 code units after substitution. Files and text are sent as message content, not attachments.
-4. Choose a fixed delivery interval (default 10 seconds, minimum 5). This is pacing, not a promise against account restrictions.
+4. Choose a delivery interval (default 0 seconds). Zero adds no delay between sequential deliveries; positive values add the specified wait. Actual throughput depends on Discord response times and rate limits, which the client continues to respect.
 5. Choose preview or sending. The program authenticates, checks the server, and loads its members, including offline members. It requires Kick Members, Ban Members, or Manage Roles permission for a full list; it stops if a partial list is detected. Bots and your own account are excluded.
 6. Review the recipient count and sample personalized message. Sending requires the exact confirmation `SEND <count>`. Any other response cancels.
 7. Review progress and the final counts. Ctrl+C stops future sends. Already sent messages remain sent, and a request already in flight may still complete.

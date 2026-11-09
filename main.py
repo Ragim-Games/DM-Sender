@@ -68,12 +68,12 @@ def read_message() -> str:
 def read_interval() -> float:
     while True:
         try:
-            interval = float(prompt("Seconds between recipients [10; minimum 5]: ") or "10")
-            if math.isfinite(interval) and 5 <= interval <= 3600:
+            interval = float(prompt("Seconds between recipients [0; no added delay]: ") or "0")
+            if math.isfinite(interval) and 0 <= interval <= 3600:
                 return interval
         except ValueError:
             pass
-        print("Enter a number between 5 and 3600.")
+        print("Enter a number between 0 and 3600.")
 
 
 async def deliver(recipients, template, server, campaign, journal, interval, *, sleep=asyncio.sleep):
@@ -112,7 +112,7 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
             sent += 1
             journal.finish(campaign, member.id, "sent")
             print(f"Sent {sent}/{len(recipients)} | User ID: {member.id}")
-            if sent + skipped < len(recipients):
+            if interval > 0 and sent + skipped < len(recipients):
                 await sleep(interval)
     finally:
         print(f"Results: sent={sent}, skipped={skipped}, failed/uncertain={failed}, "
