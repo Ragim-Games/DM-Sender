@@ -126,6 +126,10 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                                      me=SimpleNamespace(guild_permissions=SimpleNamespace(
                                          kick_members=True, ban_members=False, manage_roles=False)),
                                      fetch_members=AsyncMock(return_value=[self.person]))
+        self.channel = SimpleNamespace(id=456, permissions_for=lambda member: SimpleNamespace(view_channel=True))
+        self.guild.text_channels = [self.channel]
+        self.guild.default_role = object()
+        self.guild.get_channel = lambda channel_id: self.channel if channel_id == 456 else None
         guild = self.guild
 
         class FakeClient:
@@ -192,11 +196,12 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await run_session("fake-token", 123, "Hello", 0, False))
         self.guild.fetch_members.assert_awaited_once()
         self.person.send.assert_awaited_once()
-        self.assertIn("members visible to this account", str(output.call_args_list))
+        self.guild.fetch_members.assert_awaited_once_with(channels=[self.channel], force_scraping=True)
+        self.assertIn("channel's visible members", str(output.call_args_list))
 
     @patch("builtins.print")
     async def test_partial_preview_does_not_send(self, output):
-        self.guild.me = None
+        self.guild.me.guild_permissions.kick_members = False
         self.guild.member_count = None
         self.assertTrue(await run_session("fake-token", 123, "Hello", 0, True))
         self.person.send.assert_not_awaited()

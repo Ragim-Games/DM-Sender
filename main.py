@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 from core import Journal, campaign_key, render_message, snowflake
+from member_lookup import describe_error, load_members
 from token_store import TokenStorageError, TokenStore
 
 ROOT = Path(__file__).resolve().parent
@@ -158,7 +159,7 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
 
 
 async def run_session(token: str, guild_id: int, template: str, interval: float, preview: bool,
-                      on_authenticated=None) -> bool:
+                      on_authenticated=None, member_channel_id=None) -> bool:
     import discord
 
     # No CAPTCHA handler, proxy rotation, or application-level retry loop.
@@ -181,14 +182,8 @@ async def run_session(token: str, guild_id: int, template: str, interval: float,
             guild = client.get_guild(guild_id)
             if guild is None:
                 raise ValueError("This account cannot access that Guild ID.")
-            member = guild.me
-            permissions = member.guild_permissions if member else None
             print(f"Connected as: {client.user.name} | Server: {guild.name}")
-            if permissions and (permissions.kick_members or permissions.ban_members or permissions.manage_roles):
-                print("Requesting the server member list...")
-            else:
-                print("Loading members visible to this account. Offline or hidden members may be missing.")
-            members = await asyncio.wait_for(guild.fetch_members(), timeout=180)
+            members = await load_members(guild, member_channel_id)
             unique = {member.id: member for member in members}
             if not unique:
                 raise ValueError("Discord returned no members for this account. No messages were sent.")
@@ -241,6 +236,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Interactive single-pass Discord announcement sender.")
     parser.add_argument("--preview", action="store_true", help="Connect and preview recipients without sending any DMs.")
     parser.add_argument("--title-only", action="store_true", help="Display the startup title without connecting.")
+    parser.add_argument("--member-channel", type=snowflake, metavar="CHANNEL_ID",
+                        help="Read members from a specific visible text channel's sidebar.")
     token_options = parser.add_mutually_exclusive_group()
     token_options.add_argument("--replace-token", action="store_true", help="Enter a new token instead of using the saved one.")
     token_options.add_argument("--forget-token", action="store_true", help="Delete the saved account token and exit without connecting.")
@@ -290,7 +287,8 @@ def main() -> int:
                 print("Choose 1 or 2.")
         on_authenticated = (lambda: remember_token(store, token)) if remember else None
         return 0 if asyncio.run(run_session(token, guild_id, template, interval, preview,
-                                            on_authenticated=on_authenticated)) else 1
+                                            on_authenticated=on_authenticated,
+                                            member_channel_id=args.member_channel)) else 1
     except (KeyboardInterrupt, EOFError):
         print("\nStopped. Earlier deliveries remain recorded; pending deliveries are not retried automatically.")
         return 130
@@ -298,10 +296,8 @@ def main() -> int:
         print("Login failed. Check your token locally and run with --replace-token to enter a new one.")
     except ValueError as error:
         print(error)
-    except (discord.DiscordException, TimeoutError, OSError):
-        print("Stopped: a Discord, network, or local storage error occurred. Check your account and connection.")
-    except Exception:
-        print("Stopped: an unexpected error occurred. No further messages will be sent.")
+    except Exception as error:
+        print(describe_error(error))
     return 1
 
 

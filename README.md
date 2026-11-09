@@ -38,6 +38,20 @@ python3 -m venv .venv
 
 The pinned client library handles normal Discord rate-limit waits. The application sends sequentially and stops at the first surfaced API error, extended rate limit, CAPTCHA, or unconfirmed delivery. It does not solve CAPTCHAs, rotate accounts or proxies, or bypass blocks. A failed recipient can therefore prevent the rest of the announcement from being delivered in that run.
 
+## Choosing a member-list channel
+
+For sidebar lookup, the app chooses a text channel your account can view, preferring one also visible to the default role. Servers that grant channel access through custom roles do not need a channel open to everyone. Member sidebars differ between channels; the selected channel ID and retrieved count are shown before confirmation.
+
+To use the channel whose member list you can see in Discord, copy that channel's ID and pass it explicitly:
+
+```powershell
+.venv\Scripts\python main.py --member-channel CHANNEL_ID --preview
+```
+
+Replace `CHANNEL_ID` with the numeric ID. Omit `--preview` when ready for the normal send-confirmation workflow. The channel must belong to the selected server and be visible to your account. Explicit selection reads that channel's sidebar even if you have moderation permissions. It cannot expose hidden members or guarantee a whole-server list.
+
+If lookup still fails, the program reports an exception type or numeric Discord HTTP/code pair instead of a generic connection error. Raw API response bodies and tokens are not printed. A member lookup timeout stops before any DMs are sent.
+
 ## Remembering, replacing, and deleting a token
 
 Update dependencies before running an upgraded copy:
