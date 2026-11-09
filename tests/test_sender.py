@@ -105,6 +105,20 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sent=2, skipped=0, failed/uncertain=1, not attempted=0", str(output.call_args_list))
 
     @patch("builtins.print")
+    async def test_no_mutual_guilds_skips_to_next_recipient(self, output):
+        self.members[1].send.side_effect = discord.Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"), {"code": 50278, "message": "No mutual guilds"})
+        sleep = AsyncMock()
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=sleep))
+        self.members[0].send.assert_awaited_once()
+        self.members[2].send.assert_awaited_once()
+        sleep.assert_not_awaited()
+        self.assertIn("code 50278", str(output.call_args_list))
+        self.assertIn("sent=2, skipped=0, failed/uncertain=1, not attempted=0", str(output.call_args_list))
+        status = self.journal.db.execute("SELECT status FROM deliveries WHERE user_id='2'").fetchone()[0]
+        self.assertEqual(status, "failed:403:50278")
+
+    @patch("builtins.print")
     async def test_unknown_user_continues_with_configured_interval(self, output):
         self.members[0].send.side_effect = discord.NotFound(
             SimpleNamespace(status=404, reason="Not Found"), {"code": 10013, "message": "Unknown user"})

@@ -142,6 +142,7 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
                 journal.finish(campaign, member.id, f"failed:{error.status}:{error.code}")
                 failed += 1
                 reason = {(403, 50007): "cannot send messages to this user",
+                          (403, 50278): "Discord reports no mutual guilds with this user",
                           (404, 10013): "user no longer available"}.get((error.status, error.code))
                 if reason:
                     print(f"Skipped user {member.id}: {reason} (code {error.code}). Continuing with the next recipient.")
