@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 from core import Journal, campaign_key, render_message, snowflake
+from token_store import TokenStorageError, TokenStore
 
 ROOT = Path(__file__).resolve().parent
 
@@ -24,12 +25,48 @@ def read_token() -> str:
     with warnings.catch_warnings():
         warnings.simplefilter("error", getpass.GetPassWarning)
         try:
-            token = getpass.getpass("Account token (hidden; never saved): ").strip()
+            token = getpass.getpass("Account token (hidden): ").strip()
         except getpass.GetPassWarning:
             raise ValueError("Hidden input is unavailable. Use Windows Terminal or another terminal.") from None
     if not token or any(character.isspace() for character in token):
         raise ValueError("Enter a non-empty account token without whitespace.")
     return token
+
+
+def select_token(store: TokenStore, replace: bool = False):
+    can_save = True
+    if not replace:
+        try:
+            saved = store.load()
+        except TokenStorageError:
+            print("Credential storage is unavailable. The token will be used for this session only.")
+            can_save = False
+        else:
+            if saved and not any(character.isspace() for character in saved):
+                print("Using saved account token. Use --replace-token to change it or --forget-token to delete it.")
+                return saved, False
+            if saved is not None:
+                print("The saved token is invalid. Enter a replacement.")
+    token = read_token()
+    if not can_save:
+        return token, False
+    while True:
+        answer = prompt("Remember this token in OS credential storage after successful login? [Y/n]: ").lower()
+        if answer in ("", "y", "yes"):
+            return token, True
+        if answer in ("n", "no"):
+            print("This token will be used for this session only. Any previously saved token is unchanged.")
+            return token, False
+        print("Enter yes or no.")
+
+
+def remember_token(store: TokenStore, token: str) -> None:
+    try:
+        store.save(token)
+    except TokenStorageError:
+        print("Could not save the token. Continuing with this session only; any prior saved token may remain.")
+    else:
+        print("Token saved in OS credential storage for future runs.")
 
 
 def read_message() -> str:
@@ -120,7 +157,8 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
     return failed == 0
 
 
-async def run_session(token: str, guild_id: int, template: str, interval: float, preview: bool) -> bool:
+async def run_session(token: str, guild_id: int, template: str, interval: float, preview: bool,
+                      on_authenticated=None) -> bool:
     import discord
 
     # No CAPTCHA handler, proxy rotation, or application-level retry loop.
@@ -138,6 +176,8 @@ async def run_session(token: str, guild_id: int, template: str, interval: float,
             if ready not in done:
                 raise ValueError("Login timed out. No messages were sent.")
             await ready
+            if on_authenticated is not None:
+                on_authenticated()
             guild = client.get_guild(guild_id)
             if guild is None:
                 raise ValueError("This account cannot access that Guild ID.")
@@ -197,6 +237,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Interactive single-pass Discord announcement sender.")
     parser.add_argument("--preview", action="store_true", help="Connect and preview recipients without sending any DMs.")
     parser.add_argument("--title-only", action="store_true", help="Display the startup title without connecting.")
+    token_options = parser.add_mutually_exclusive_group()
+    token_options.add_argument("--replace-token", action="store_true", help="Enter a new token instead of using the saved one.")
+    token_options.add_argument("--forget-token", action="store_true", help="Delete the saved account token and exit without connecting.")
     args = parser.parse_args()
     try:
         print((ROOT / "title.txt").read_text(encoding="utf-8-sig"))
@@ -204,8 +247,16 @@ def main() -> int:
         print("DM Sender")
     if args.title_only:
         return 0
+    store = TokenStore()
+    if args.forget_token:
+        try:
+            print("Saved token deleted." if store.forget() else "No saved token found.")
+            return 0
+        except TokenStorageError:
+            print("Could not delete the saved token. Unlock or check your OS credential storage and try again.")
+            return 1
     print("User-account automation violates Discord's terms and may terminate your account.")
-    print("Tokens stay in memory. Never share your token or commit it to GitHub.")
+    print("Remembered tokens use OS credential storage. Never share your token or commit it to GitHub.")
     print("One announcement per recipient; Ctrl+C stops the program.\n")
     logging.getLogger("discord").addHandler(logging.NullHandler())
     logging.getLogger("discord").propagate = False
@@ -215,7 +266,7 @@ def main() -> int:
         print("Missing dependency. Run: python -m pip install -r requirements.txt")
         return 1
     try:
-        token = read_token()
+        token, remember = select_token(store, replace=args.replace_token)
         while True:
             try:
                 guild_id = snowflake(prompt("Guild ID: "))
@@ -233,12 +284,14 @@ def main() -> int:
                     preview = choice == "1"
                     break
                 print("Choose 1 or 2.")
-        return 0 if asyncio.run(run_session(token, guild_id, template, interval, preview)) else 1
+        on_authenticated = (lambda: remember_token(store, token)) if remember else None
+        return 0 if asyncio.run(run_session(token, guild_id, template, interval, preview,
+                                            on_authenticated=on_authenticated)) else 1
     except (KeyboardInterrupt, EOFError):
         print("\nStopped. Earlier deliveries remain recorded; pending deliveries are not retried automatically.")
         return 130
     except discord.LoginFailure:
-        print("Login failed. Check your account token locally.")
+        print("Login failed. Check your token locally and run with --replace-token to enter a new one.")
     except ValueError as error:
         print(error)
     except (discord.DiscordException, TimeoutError, OSError):

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import discord
 
@@ -147,7 +147,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             def get_guild(self, guild_id):
                 return guild
 
-        self.client_patch = patch("discord.Client", return_value=FakeClient())
+        self.client = FakeClient()
+        self.client_patch = patch("discord.Client", return_value=self.client)
         self.journal_patch = patch("main.Journal", side_effect=lambda _: Journal(Path(self.directory.name) / "journal.sqlite3"))
         self.client_patch.start()
         self.journal_patch.start()
@@ -159,7 +160,19 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
     @patch("builtins.print")
     async def test_preview_never_sends(self, _print):
-        self.assertTrue(await run_session("fake-token", 123, "Hello", 10, True))
+        on_authenticated = Mock()
+        self.assertTrue(await run_session("fake-token", 123, "Hello", 10, True,
+                                          on_authenticated=on_authenticated))
+        on_authenticated.assert_called_once_with()
+        self.person.send.assert_not_awaited()
+
+    @patch("builtins.print")
+    async def test_failed_login_never_saves_token(self, _print):
+        self.client.start = AsyncMock(side_effect=discord.LoginFailure("Invalid token"))
+        on_authenticated = Mock()
+        with self.assertRaises(discord.LoginFailure):
+            await run_session("fake-token", 123, "Hello", 10, True, on_authenticated=on_authenticated)
+        on_authenticated.assert_not_called()
         self.person.send.assert_not_awaited()
 
     @patch("builtins.print")

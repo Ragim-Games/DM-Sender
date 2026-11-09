@@ -28,7 +28,7 @@ python3 -m venv .venv
 
 ## Workflow
 
-1. Enter your account token in the hidden terminal prompt. It is held in memory, never saved by this application, and sent to Discord for authentication. Do not paste it into chat, a command-line argument, source code, or GitHub.
+1. On the first run, enter your account token in the hidden terminal prompt and choose whether to remember it (default Yes). It is saved only after successful login and automatically reused next time. Choosing No keeps the new token in memory for this session. Tokens are sent to Discord for authentication. Do not paste them into chat, command-line arguments, source code, or GitHub.
 2. Enter a server's numeric Guild ID. Your account must already belong to the server. Enable Developer Mode in Discord, then use the server's Copy Server ID action.
 3. Type a multiline message ending with `.end`, or load a UTF-8 text file. Optional placeholders are `{username}`, `{display_name}`, and `{server}`. Other braces are literal. Messages must fit within 2,000 UTF-16 code units after substitution. Files and text are sent as message content, not attachments.
 4. Choose a delivery interval (default 0 seconds). Zero adds no delay between sequential deliveries; positive values add the specified wait. Actual throughput depends on Discord response times and rate limits, which the client continues to respect.
@@ -37,6 +37,25 @@ python3 -m venv .venv
 7. Review progress and the final counts. Ctrl+C stops future sends. Already sent messages remain sent, and a request already in flight may still complete.
 
 The pinned client library handles normal Discord rate-limit waits. The application sends sequentially and stops at the first surfaced API error, extended rate limit, CAPTCHA, or unconfirmed delivery. It does not solve CAPTCHAs, rotate accounts or proxies, or bypass blocks. A failed recipient can therefore prevent the rest of the announcement from being delivered in that run.
+
+## Remembering, replacing, and deleting a token
+
+Update dependencies before running an upgraded copy:
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+Remembered tokens use Windows Credential Manager, macOS Keychain, or Linux Secret Service through [keyring](https://keyring.readthedocs.io/en/latest/). The application explicitly selects native backends and never falls back to a plaintext token file. If storage is unavailable or locked, you can still enter a token for the current session. On Linux, an unlocked Secret Service keyring and desktop D-Bus session are required for persistence.
+
+One token is stored for the current OS user under service `Ragim-Games.DM-Sender` and account `default-account`. Copies of this app run by the same OS user share that entry. Only save a token under an OS account you trust; other processes running as that user may be able to access the credential vault.
+
+```powershell
+.venv\Scripts\python main.py --replace-token
+.venv\Scripts\python main.py --forget-token
+```
+
+`--replace-token` prompts for a new token and asks whether to remember it. The existing entry is replaced only after the new token logs in successfully and saving succeeds. Declining to save, cancelling, or failing login leaves the previous token unchanged. `--forget-token` deletes the entry and exits without connecting to Discord; it does not revoke the token in Discord or remove delivery history. If a saved token expires, use `--replace-token`. Both flags can also be passed to `start.bat`. `--title-only` always displays only the title and does not access credentials.
 
 ## Duplicate protection and local data
 
