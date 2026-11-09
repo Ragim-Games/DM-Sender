@@ -36,7 +36,9 @@ python3 -m venv .venv
 6. Review the recipient count and sample personalized message. Sending requires the exact confirmation `SEND <count>`. Any other response cancels.
 7. Review progress and the final counts. Ctrl+C stops future sends. Already sent messages remain sent, and a request already in flight may still complete.
 
-The pinned client library handles normal Discord rate-limit waits. The application sends sequentially and stops at the first surfaced API error, extended rate limit, CAPTCHA, or unconfirmed delivery. It does not solve CAPTCHAs, rotate accounts or proxies, or bypass blocks. A failed recipient can therefore prevent the rest of the announcement from being delivered in that run.
+The pinned client library handles normal Discord rate-limit waits. The application sends sequentially. Recipient-specific failures (`403 / 50007`: cannot message that user; `404 / 10013`: unknown user) are recorded, and the next recipient is attempted without an extra error delay. Your configured interval still applies. These failures count under `failed/uncertain` in the summary, while `skipped` counts previously recorded attempts. The process returns a nonzero exit code if any delivery failed, even when all remaining recipients were attempted. See [Discord's error-code reference](https://docs.discord.com/developers/topics/opcodes-and-status-codes).
+
+CAPTCHA challenges, extended rate limits, account restrictions, invalid requests, and uncertain network outcomes stop the run. In the pinned library, a CAPTCHA challenge is represented as `CaptchaRequired` with code `-1`; the program now labels that explicitly. An unexplained `400 / -1` is not treated as a closed-DM error. The app does not solve CAPTCHAs, rotate accounts or proxies, bypass blocks, or repeatedly retry failed recipients.
 
 ## Choosing a member-list channel
 

@@ -92,14 +92,52 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(member.send.call_args.kwargs["allowed_mentions"].everyone)
 
     @patch("builtins.print")
-    async def test_forbidden_stops_remaining_recipients(self, _print):
+    async def test_closed_dm_skips_to_remaining_recipients(self, output):
         self.members[0].send.side_effect = discord.Forbidden(
             SimpleNamespace(status=403, reason="Forbidden"), {"code": 50007, "message": "Cannot send"})
-        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 10, sleep=AsyncMock()))
-        self.members[1].send.assert_not_awaited()
-        self.members[2].send.assert_not_awaited()
+        sleep = AsyncMock()
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=sleep))
+        sleep.assert_not_awaited()
+        self.members[1].send.assert_awaited_once()
+        self.members[2].send.assert_awaited_once()
         self.assertTrue(self.journal.seen("key", 1))
-        self.assertFalse(self.journal.seen("key", 2))
+        self.assertTrue(self.journal.seen("key", 2))
+        self.assertIn("sent=2, skipped=0, failed/uncertain=1, not attempted=0", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_unknown_user_continues_with_configured_interval(self, output):
+        self.members[0].send.side_effect = discord.NotFound(
+            SimpleNamespace(status=404, reason="Not Found"), {"code": 10013, "message": "Unknown user"})
+        sleep = AsyncMock()
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 2, sleep=sleep))
+        self.assertEqual(sleep.await_count, 2)
+        self.members[2].send.assert_awaited_once()
+
+    @patch("builtins.print")
+    async def test_captcha_is_identified_and_stops(self, output):
+        self.members[0].send.side_effect = discord.CaptchaRequired(
+            SimpleNamespace(status=400, reason="Bad Request"),
+            {"captcha_key": ["required"], "captcha_rqtoken": "private-challenge-data"})
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=AsyncMock()))
+        self.members[1].send.assert_not_awaited()
+        self.assertIn("CAPTCHA verification", str(output.call_args_list))
+        self.assertNotIn("private-challenge-data", str(output.call_args_list))
+        self.assertEqual(self.journal.db.execute("SELECT status FROM deliveries").fetchone()[0], "captcha_required")
+
+    @patch("builtins.print")
+    async def test_unclassified_400_stops(self, output):
+        self.members[0].send.side_effect = discord.HTTPException(
+            SimpleNamespace(status=400, reason="Bad Request"), {"code": -1, "message": "private-response"})
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=AsyncMock()))
+        self.members[1].send.assert_not_awaited()
+        self.assertNotIn("private-response", str(output.call_args_list))
+
+    @patch("builtins.print")
+    async def test_non_recipient_forbidden_still_stops(self, output):
+        self.members[0].send.side_effect = discord.Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"), {"code": 50001, "message": "Missing access"})
+        self.assertFalse(await deliver(self.members, "Hello", "Server", "key", self.journal, 0, sleep=AsyncMock()))
+        self.members[1].send.assert_not_awaited()
 
     @patch("builtins.print")
     async def test_unknown_delivery_is_not_retried(self, _print):

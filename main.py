@@ -115,12 +115,12 @@ def read_interval() -> float:
 
 
 async def deliver(recipients, template, server, campaign, journal, interval, *, sleep=asyncio.sleep):
-    """Send sequentially. Stop after any API failure; leave ambiguous attempts pending."""
+    """Skip recipient-specific rejections; stop on account or ambiguous failures."""
     import discord
 
     sent = skipped = failed = 0
     try:
-        for member in recipients:
+        for index, member in enumerate(recipients):
             message = render_message(template, member.name, member.display_name, server)
             if not journal.reserve(campaign, member.id):
                 skipped += 1
@@ -131,13 +131,24 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
                 failed += 1
                 print("Stopped during a request. Its delivery status is uncertain.")
                 raise
+            except discord.CaptchaRequired:
+                journal.finish(campaign, member.id, "captcha_required")
+                failed += 1
+                print("Stopped: Discord requires CAPTCHA verification (HTTP 400, code -1).")
+                print("This is a verification challenge, not a closed-DM error. No further recipients will be attempted.")
+                break
             except discord.HTTPException as error:
                 # Never print the response body: it can contain request details.
                 journal.finish(campaign, member.id, f"failed:{error.status}:{error.code}")
                 failed += 1
-                print(f"Stopped: Discord rejected delivery (HTTP {error.status}, code {error.code}).")
-                print("Resolve the restriction in Discord. This program will not bypass it.")
-                break
+                reason = {(403, 50007): "cannot send messages to this user",
+                          (404, 10013): "user no longer available"}.get((error.status, error.code))
+                if reason:
+                    print(f"Skipped user {member.id}: {reason} (code {error.code}). Continuing with the next recipient.")
+                else:
+                    print(f"Stopped: Discord {type(error).__name__} (HTTP {error.status}, code {error.code}).")
+                    print("This error is not confirmed to be recipient-specific. No further recipients will be attempted.")
+                    break
             except discord.RateLimited:
                 journal.finish(campaign, member.id, "rate_limited")
                 failed += 1
@@ -147,10 +158,11 @@ async def deliver(recipients, template, server, campaign, journal, interval, *, 
                 failed += 1
                 print("Stopped: delivery could not be confirmed. This recipient will not be retried automatically.")
                 break
-            sent += 1
-            journal.finish(campaign, member.id, "sent")
-            print(f"Sent {sent}/{len(recipients)} | User ID: {member.id}")
-            if interval > 0 and sent + skipped < len(recipients):
+            else:
+                sent += 1
+                journal.finish(campaign, member.id, "sent")
+                print(f"Sent {sent}/{len(recipients)} | User ID: {member.id}")
+            if interval > 0 and index + 1 < len(recipients):
                 await sleep(interval)
     finally:
         print(f"Results: sent={sent}, skipped={skipped}, failed/uncertain={failed}, "
